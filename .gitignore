@@ -1,0 +1,9 @@
+README.md
+PROJECT_PLAN.md
+PROJECT_PLAN.v1-handrolled.md
+.env
+.venv/
+__pycache__/
+.DS_Store
+.pytest_cache/
+.ruff_cache/
