@@ -1,10 +1,10 @@
   langgraph==1.2.2
   langchain==1.3.2
   langchain-anthropic
-  langchain-tavily==0.2.18
+  tavily-python==0.7.24
   pydantic
   httpx
   trafilatura
   python-dotenv==1.2.2
-
-
+  pytest
+  respx
