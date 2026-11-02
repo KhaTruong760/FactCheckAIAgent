@@ -14,7 +14,7 @@ from schemas import (
 
 
 def merge_by_id(left: dict, right: dict) -> dict:
-    """Dict-merge reducer. A value of None deletes the key (tombstone)."""
+    """Dict-merge reducer. A value of None deletes the key."""
     merged = {**left, **right}
     return {k: v for k, v in merged.items() if v is not None}
 
