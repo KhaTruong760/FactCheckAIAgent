@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from graph.state import FactCheckInput, FactCheckOutput, FactCheckState, ResearchTask
+from graph.context import RunContext
+from graph.state import FactCheckInput, FactCheckOutput, FactCheckState, ResearchTask, initial_run_fields
 from schemas import (
     Claim,
     Evidence,
@@ -35,10 +36,7 @@ def plan(state: FactCheckState) -> dict:
             SubQuestion(id="q1", text=f"What are the key facts about {topic}?"),
             SubQuestion(id="q2", text=f"What do primary sources say about {topic}?"),
         ],
-        # non-reducer fields have no default, so initialise them here
-        "round": 0,
-        "revision_requests": [],
-        "write_attempts": 0,
+        **initial_run_fields(),
         "usage": Usage(input_tokens=1),
     }
 
@@ -189,7 +187,12 @@ def build_graph(nodes: dict | None = None):
         raise ValueError(f"Unknown node override(s): {sorted(unknown)}")
     impl = {**DEFAULT_NODES, **(nodes or {})}
 
-    g = StateGraph(FactCheckState, input_schema=FactCheckInput, output_schema=FactCheckOutput)
+    g = StateGraph(
+        FactCheckState,
+        input_schema=FactCheckInput,
+        output_schema=FactCheckOutput,
+        context_schema=RunContext,
+    )
     for name, fn in impl.items():
         g.add_node(name, fn)
 

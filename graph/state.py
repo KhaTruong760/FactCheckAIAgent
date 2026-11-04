@@ -44,6 +44,12 @@ class FactCheckState(FactCheckInput):
     usage: Annotated[Usage, operator.add]
 
 
+def initial_run_fields() -> dict:
+    """Starting values for keys without a reducer. TypedDicts have no defaults,
+    so whichever node writes `plan` must return these or later nodes KeyError."""
+    return {"round": 0, "revision_requests": [], "write_attempts": 0}
+
+
 class FactCheckOutput(TypedDict):
     report: Report
     unverified_claim_ids: list[str]
