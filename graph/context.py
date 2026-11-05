@@ -13,3 +13,5 @@ class RunContext:
     critic_model: str = "claude-haiku-4-5-20251001"
     writer_model: str = "claude-sonnet-5-5"
     max_sub_questions: int = 5
+    max_claims_per_question: int = 6
+    max_research_tool_calls: int = 8  # searches + fetches per sub-question
