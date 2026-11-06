@@ -27,6 +27,17 @@ def test_cached_tokens_are_billed_at_cache_rates():
     # 1M input of which 600k cache reads (0.1x) and 200k cache writes (1.25x)
     u = usage_from(_ai(1_000_000, 0, cache_read=600_000, cache_write=200_000))
     assert u.cost_usd == pytest.approx(200_000 * 2 / 1e6 + 600_000 * 0.2 / 1e6 + 200_000 * 2.5 / 1e6)
+    assert u.cache_read_tokens == 600_000
+
+
+def test_cache_writes_broken_down_by_ttl_are_billed():
+    # what LangChain reports when the API splits writes by TTL: cache_creation is zeroed
+    msg = _ai(1_000_000, 0, cache_read=600_000)
+    msg.usage_metadata["input_token_details"].update(
+        ephemeral_5m_input_tokens=200_000, ephemeral_1h_input_tokens=100_000)
+    u = usage_from(msg)
+    assert u.cost_usd == pytest.approx(
+        100_000 * 2 / 1e6 + 600_000 * 0.2 / 1e6 + 200_000 * 2.5 / 1e6 + 100_000 * 4 / 1e6)
 
 
 def test_usage_sums_ai_messages_in_a_transcript():

@@ -10,7 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
 from graph.context import RunContext
-from graph.state import FactCheckInput, FactCheckOutput, FactCheckState, ResearchTask, initial_run_fields
+from graph.state import PASSING, FactCheckInput, FactCheckOutput, FactCheckState, ResearchTask, initial_run_fields
 from schemas import (
     Claim,
     Evidence,
@@ -24,7 +24,6 @@ from schemas import (
 
 MAX_ROUNDS = 2           # revision rounds after the first research pass
 MAX_WRITE_ATTEMPTS = 2   # write -> audit cycles before we finalize anyway
-PASSING = {"SUPPORTED"}  # labels that count as verified
 
 
 # --- stub LLM nodes (to be replaced by agents/*) ---
@@ -180,7 +179,7 @@ DEFAULT_NODES = {
 }
 
 
-def build_graph(nodes: dict | None = None):
+def build_graph(nodes: dict | None = None, checkpointer=None):
     """Compile the pipeline. `nodes` overrides individual node functions by name."""
     unknown = set(nodes or {}) - set(DEFAULT_NODES)
     if unknown:
@@ -204,4 +203,4 @@ def build_graph(nodes: dict | None = None):
     g.add_edge("write", "audit")
     g.add_conditional_edges("audit", route_after_audit, ["write", "finalize"])
     g.add_edge("finalize", END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)

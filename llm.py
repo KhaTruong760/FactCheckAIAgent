@@ -16,7 +16,7 @@ load_dotenv()
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 # USD per million tokens: (input, output). Cache reads bill at 0.1x input,
-# cache writes at 1.25x input.
+# cache writes at 1.25x input (5-minute TTL) or 2x (1-hour TTL).
 PRICES = {
     "claude-opus-5-5": (4.00, 20.00),
     "claude-sonnet-5-5": (2.00, 10.00),
@@ -56,16 +56,21 @@ def _message_usage(m: AIMessage) -> Usage:
     meta = m.usage_metadata
     details = meta.get("input_token_details") or {}
     cache_read = details.get("cache_read") or 0
-    cache_write = details.get("cache_creation") or 0
+    # when the API breaks writes down by TTL, LangChain zeroes cache_creation and
+    # reports them under these keys instead
+    write_5m = (details.get("cache_creation") or 0) + (details.get("ephemeral_5m_input_tokens") or 0)
+    write_1h = details.get("ephemeral_1h_input_tokens") or 0
     # LangChain's input_tokens already includes cached tokens; split them back out
-    fresh = meta["input_tokens"] - cache_read - cache_write
+    fresh = meta["input_tokens"] - cache_read - write_5m - write_1h
 
     model = m.response_metadata.get("model_name", "")
     in_price, out_price = PRICES.get(model, (0.0, 0.0))
     cost = (
         fresh * in_price
         + cache_read * in_price * 0.1
-        + cache_write * in_price * 1.25
+        + write_5m * in_price * 1.25
+        + write_1h * in_price * 2.0
         + meta["output_tokens"] * out_price
     ) / 1_000_000
-    return Usage(input_tokens=meta["input_tokens"], output_tokens=meta["output_tokens"], cost_usd=cost)
+    return Usage(input_tokens=meta["input_tokens"], output_tokens=meta["output_tokens"], cost_usd=cost,
+                 cache_read_tokens=cache_read)

@@ -13,6 +13,9 @@ from schemas import (
 )
 
 
+PASSING = {"SUPPORTED"}  # verdict labels that count as verified
+
+
 def merge_by_id(left: dict, right: dict) -> dict:
     """Dict-merge reducer. A value of None deletes the key."""
     merged = {**left, **right}

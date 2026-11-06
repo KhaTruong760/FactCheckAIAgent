@@ -48,12 +48,14 @@ class Usage(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
+    cache_read_tokens: int = 0  # part of input_tokens, billed at 0.1x
 
     def __add__(self, other: "Usage") -> "Usage":
         return Usage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
             cost_usd=self.cost_usd + other.cost_usd,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
         )
 
 class ResearchResult(BaseModel):

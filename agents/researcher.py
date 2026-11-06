@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
 from langchain.agents.structured_output import ProviderStrategy
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.tools import tool
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
@@ -54,6 +55,9 @@ def research_agent(task: ResearchTask, runtime: Runtime[RunContext]) -> dict:
             ToolCallLimitMiddleware(run_limit=ctx.max_research_tool_calls),
             # hard backstop against a model that keeps calling tools anyway
             ModelCallLimitMiddleware(run_limit=ctx.max_research_tool_calls + 2),
+            # each call resends the whole transcript (pages included); cache it so
+            # the repeated prefix bills at 0.1x. "ignore" only skips the fake test models.
+            AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
         ],
     )
     out = agent.invoke({"messages": [("user", render_task(task))]})

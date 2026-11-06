@@ -4,6 +4,8 @@ from datetime import date
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from pydantic import PrivateAttr
 
 from agents import researcher
 from agents.researcher import (
@@ -36,9 +38,24 @@ class FakeRuntime:
 
 
 class FakeToolModel(GenericFakeChatModel):
-    """Plays back scripted AIMessages; bind_tools is a no-op so create_agent accepts it."""
+    """Plays back scripted AIMessages; bind_tools is a no-op so create_agent accepts it.
+
+    The script lives in a private attribute: with a model-wrapping middleware (prompt
+    caching) LangChain serializes the model, which would drain a public iterator field.
+    """
+    _script: list = PrivateAttr(default_factory=list)
+
+    def __init__(self, script):
+        super().__init__(messages=iter(()))
+        self._script = list(script)
+
     def bind_tools(self, tools, **kwargs):
         return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        if not self._script:
+            raise AssertionError("FakeToolModel ran out of scripted messages")
+        return ChatResult(generations=[ChatGeneration(message=self._script.pop(0))])
 
 
 def _ai(content="", tool_calls=(), input_tokens=100, output_tokens=20):
@@ -68,7 +85,7 @@ def script(monkeypatch):
     def set_script(*messages):
         def factory(model_id, **kwargs):
             holder["model_id"], holder["kwargs"] = model_id, kwargs
-            return FakeToolModel(messages=iter(messages))
+            return FakeToolModel(messages)
         monkeypatch.setattr(researcher, "chat_model", factory)
         return holder
     return set_script
@@ -198,6 +215,18 @@ def test_no_structured_response_raises(script):
     script(*[_ai(tool_calls=[_fetch_call(URL, f"t{i}")]) for i in range(10)])
     with pytest.raises(ResearchFailed):
         research_agent(_task(), FakeRuntime(ctx))
+
+
+def test_agent_turns_on_prompt_caching(script, monkeypatch):
+    seen = {}
+    real = researcher.create_agent
+    def spy(**kwargs):
+        seen["middleware"] = kwargs["middleware"]
+        return real(**kwargs)
+    monkeypatch.setattr(researcher, "create_agent", spy)
+    script(_answer())
+    research_agent(_task(), FakeRuntime())
+    assert any(isinstance(m, researcher.AnthropicPromptCachingMiddleware) for m in seen["middleware"])
 
 
 # --- in the graph ---
