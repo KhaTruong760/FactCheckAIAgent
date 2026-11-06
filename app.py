@@ -1,5 +1,8 @@
 """CLI entry point: `python app.py "topic"` prints a cited Markdown fact-check report.
 
+`python app.py --claim "The Eiffel Tower opened in 1889"` checks a claim instead
+and opens the report with a rating (true, false, mixed, ...).
+
 Uses the real planner, researcher and writer; critique, audit and finalize are
 still the stubs in graph/builder.py, so every claim currently counts as verified.
 Progress and cost go to stderr, the report to stdout (or --out).
@@ -23,17 +26,24 @@ from schemas import Claim, Evidence, Report, Usage
 
 REAL_NODES = {"plan": planner_agent, "research": research_agent, "write": writer_agent}
 REQUIRED_KEYS = ("ANTHROPIC_API_KEY", "TAVILY_API_KEY")
+RATING_LABELS = {
+    "TRUE": "True",
+    "FALSE": "False",
+    "MIXED": "Mixed",
+    "DISPUTED": "Disputed",
+    "NOT_ENOUGH_EVIDENCE": "Not enough evidence",
+}
 
 
 def run(topic: str, ctx: RunContext, run_id: str | None = None, nodes: dict | None = None,
-        log=lambda msg: None) -> tuple[dict, dict[str, Usage]]:
+        log=lambda msg: None, mode: str = "topic") -> tuple[dict, dict[str, Usage]]:
     """Run the pipeline; return its full final state (not just FactCheckOutput) and usage per node."""
     run_id = run_id or uuid.uuid4().hex[:8]
     # the checkpointer is only here so we can read claims/evidence back for the sources list
     graph = build_graph(REAL_NODES if nodes is None else nodes, checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": run_id}, "recursion_limit": 50}
     by_node: dict[str, Usage] = {}
-    for update in graph.stream({"run_id": run_id, "topic": topic}, config, context=ctx,
+    for update in graph.stream({"run_id": run_id, "topic": topic, "mode": mode}, config, context=ctx,
                                stream_mode="updates"):
         for node, delta in update.items():
             log(f"  done: {node}")
@@ -77,7 +87,10 @@ def render_markdown(report: Report, claims: dict[str, Claim], evidence: dict[str
 
     body = CITATION.sub(cite, report.markdown)
     body = re.sub(r"\[(\d+)\](?:\s*\[\1\])+", r"[\1]", body)  # adjacent claims from the same page
-    lines = [f"# {report.title}", "", body]
+    lines = [f"# {report.title}", ""]
+    if report.rating:
+        lines += [f"**Verdict: {RATING_LABELS[report.rating]}**", ""]
+    lines.append(body)
 
     if numbers:
         lines += ["", "## Sources", ""]
@@ -97,6 +110,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     defaults = RunContext()
     p = argparse.ArgumentParser(description="Research a topic and print a cited fact-check report.")
     p.add_argument("topic", help="what to fact-check, e.g. \"the Eiffel Tower\"")
+    p.add_argument("--claim", action="store_true",
+                   help="treat the input as a claim to rate, e.g. \"The Eiffel Tower opened in 1889\"")
     p.add_argument("--out", type=Path, help="write the Markdown report here instead of stdout")
     p.add_argument("--run-id", help="thread id for this run (default: random)")
     p.add_argument("--max-sub-questions", type=int, default=defaults.max_sub_questions)
@@ -122,8 +137,9 @@ def main(argv: list[str] | None = None) -> int:
         max_research_tool_calls=args.max_tool_calls,
     )
     log = lambda msg: print(msg, file=sys.stderr, flush=True)
-    log(f"Fact-checking {args.topic!r}...")
-    state, by_node = run(args.topic, ctx, run_id=args.run_id, log=log)
+    mode = "claim" if args.claim else "topic"
+    log(f"Fact-checking {mode} {args.topic!r}...")
+    state, by_node = run(args.topic, ctx, run_id=args.run_id, log=log, mode=mode)
 
     markdown = render_markdown(state["report"], state["claims"], state["evidence"],
                                state.get("unverified_claim_ids", []))

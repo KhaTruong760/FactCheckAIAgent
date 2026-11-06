@@ -1,5 +1,8 @@
 """plan node: one structured-output LLM call that splits the topic into sub-questions.
 
+In claim mode the input is a claim to check instead, and a different prompt asks
+for neutral sub-questions that cover each checkable part of it.
+
 No tools and no loop: the planner doesn't need to look anything up, so a single
 call is cheaper, faster and easier to test than an agent.
 """
@@ -7,7 +10,7 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 from graph.context import RunContext
-from graph.state import FactCheckState, initial_run_fields
+from graph.state import FactCheckState, initial_run_fields, is_claim_mode
 from llm import chat_model, load_prompt, usage_from
 from schemas import SubQuestion
 
@@ -28,10 +31,11 @@ def planner_agent(state: FactCheckState, runtime: Runtime[RunContext]) -> dict:
         method="json_schema",  # native structured output; the default (forced tool use) 400s on Sonnet 5.5
         include_raw=True,      # keep the raw AIMessage so we can read usage and stop_reason
     )
-    system = load_prompt("planner_v1").format(max_sub_questions=ctx.max_sub_questions)
+    prompt, tag = ("planner_claim_v1", "claim") if is_claim_mode(state) else ("planner_v1", "topic")
+    system = load_prompt(prompt).format(max_sub_questions=ctx.max_sub_questions)
     out = model.invoke([
         ("system", system),
-        ("user", f"<topic>{state['topic']}</topic>"),
+        ("user", f"<{tag}>{state['topic']}</{tag}>"),
     ])
 
     raw = out["raw"]

@@ -5,6 +5,7 @@ from langchain_core.runnables import RunnableLambda
 from agents import writer
 from agents.writer import (
     NO_CLAIMS_MARKDOWN,
+    ClaimDraft,
     Draft,
     WriterRefused,
     render_input,
@@ -86,9 +87,10 @@ def fake_model(monkeypatch):
     monkeypatch.setattr(writer, "chat_model", factory)
 
     def set_output(markdown=GOOD_MARKDOWN, title="Eiffel Tower facts", raw=None,
-                   parsing_error=None, parsed="default"):
+                   parsing_error=None, parsed="default", rating=None):
         if parsed == "default":
-            parsed = Draft(title=title, markdown=markdown)
+            parsed = (ClaimDraft(rating=rating, title=title, markdown=markdown) if rating
+                      else Draft(title=title, markdown=markdown))
         holder["model"] = FakeModel({"raw": raw or _raw(), "parsed": parsed, "parsing_error": parsing_error})
         return holder
     return set_output
@@ -228,6 +230,51 @@ def test_empty_report_raises(fake_model):
         writer_agent(STATE, FakeRuntime())
 
 
+# --- claim mode ---
+
+CLAIM_STATE = {**STATE, "topic": "The Eiffel Tower opened in 1899", "mode": "claim"}
+
+
+def test_claim_mode_wraps_the_claim_to_check():
+    text = render_input(CLAIM_STATE, verified_claims(CLAIM_STATE))
+    assert text.startswith("<claim_to_check>The Eiffel Tower opened in 1899</claim_to_check>")
+    assert "<topic>" not in text
+
+
+def test_claim_mode_uses_claim_prompt_and_schema(fake_model):
+    holder = fake_model(rating="FALSE")
+    out = writer_agent(CLAIM_STATE, FakeRuntime())
+
+    assert holder["model"].structured_kwargs["schema"] is ClaimDraft
+    assert holder["model"].messages[0] == ("system", writer.load_prompt("writer_claim_v1"))
+    assert out["report"].rating == "FALSE"
+    assert out["report"].claim_ids == ["a1", "b2"]
+
+
+def test_rating_is_decided_before_the_report_is_written():
+    assert list(ClaimDraft.model_fields)[0] == "rating"
+
+
+def test_topic_mode_has_no_rating(fake_model):
+    holder = fake_model()
+    out = writer_agent(STATE, FakeRuntime())
+    assert holder["model"].structured_kwargs["schema"] is Draft
+    assert out["report"].rating is None
+
+
+def test_claim_mode_without_verified_claims_is_not_enough_evidence(fake_model):
+    holder = fake_model()
+    state = {**CLAIM_STATE, "verdicts": {"a1": _verdict("a1", "UNSUPPORTED")}}
+    out = writer_agent(state, FakeRuntime())
+    assert holder["calls"] == 0
+    assert out["report"].rating == "NOT_ENOUGH_EVIDENCE"
+
+
+def test_claim_draft_rejects_unknown_rating():
+    with pytest.raises(ValueError):
+        ClaimDraft(rating="MOSTLY_TRUE", title="t", markdown="m")
+
+
 # --- in the graph ---
 
 def test_writer_drives_the_stub_pipeline(fake_model):
@@ -239,3 +286,10 @@ def test_writer_drives_the_stub_pipeline(fake_model):
     assert out["report"].claim_ids == ["q1-r0-c1", "q2-r0-c1"]
     assert "made-up" not in out["report"].markdown
     assert out["unverified_claim_ids"] == []
+
+
+def test_claim_mode_reaches_the_writer_through_the_graph(fake_model):
+    fake_model(markdown="It opened in 1889 [claim:q1-r0-c1].", rating="FALSE")
+    out = build_graph({"write": writer_agent}).invoke(
+        {"run_id": "r1", "topic": "The Eiffel Tower opened in 1899", "mode": "claim"}, context=RunContext())
+    assert out["report"].rating == "FALSE"

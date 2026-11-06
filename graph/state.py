@@ -1,5 +1,5 @@
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 from schemas import (
     Claim,
@@ -24,7 +24,8 @@ def merge_by_id(left: dict, right: dict) -> dict:
 
 class FactCheckInput(TypedDict):
     run_id: str
-    topic: str
+    topic: str  # the subject to research, or in claim mode the claim to check
+    mode: NotRequired[Literal["topic", "claim"]]  # default "topic"
 
 
 class FactCheckState(FactCheckInput):
@@ -45,6 +46,10 @@ class FactCheckState(FactCheckInput):
     unverified_claim_ids: list[str]
     # every LLM node returns its own delta
     usage: Annotated[Usage, operator.add]
+
+
+def is_claim_mode(state) -> bool:
+    return state.get("mode", "topic") == "claim"
 
 
 def initial_run_fields() -> dict:

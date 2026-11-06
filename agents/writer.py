@@ -4,6 +4,9 @@ No tools and no loop, like the planner. The model cites claims inline as
 [claim:ID]; which claims the report uses is read back from those citations in
 code, and citations to claims that aren't verified are stripped, so the report
 can't point at anything the critic didn't pass.
+
+In claim mode the model also picks a rating for the claim from a fixed enum,
+so the verdict is structured data rather than wording that varies between runs.
 """
 import re
 from xml.sax.saxutils import escape, quoteattr
@@ -12,9 +15,9 @@ from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
 from graph.context import RunContext
-from graph.state import PASSING, FactCheckState
+from graph.state import PASSING, FactCheckState, is_claim_mode
 from llm import chat_model, load_prompt, usage_from
-from schemas import Claim, Report, Usage
+from schemas import Claim, Rating, Report, Usage
 
 CITATION = re.compile(r"(\s*)\[claim:([^\]\s]+)\]")
 NO_CLAIMS_MARKDOWN = "None of the researched claims could be verified against their sources."
@@ -22,6 +25,13 @@ NO_CLAIMS_MARKDOWN = "None of the researched claims could be verified against th
 
 class Draft(BaseModel):
     """What the model fills in. Claim IDs are read from the citations in code, not listed by the LLM."""
+    title: str = Field(description="Short, specific report title")
+    markdown: str = Field(description="Report body in Markdown, citing claims inline as [claim:ID]")
+
+
+class ClaimDraft(BaseModel):
+    """Claim mode: the rating comes first so the report is written to justify it."""
+    rating: Rating = Field(description="How accurate the claim is, judged only against the verified facts")
     title: str = Field(description="Short, specific report title")
     markdown: str = Field(description="Report body in Markdown, citing claims inline as [claim:ID]")
 
@@ -36,16 +46,19 @@ def writer_agent(state: FactCheckState, runtime: Runtime[RunContext]) -> dict:
     claims = verified_claims(state)
     if not claims:
         # nothing to write about; an LLM call could only invent content
-        report = Report(title=default_title(state["topic"]), markdown=NO_CLAIMS_MARKDOWN, claim_ids=[])
+        rating = "NOT_ENOUGH_EVIDENCE" if is_claim_mode(state) else None
+        report = Report(title=default_title(state["topic"]), markdown=NO_CLAIMS_MARKDOWN, claim_ids=[],
+                        rating=rating)
         return {"report": report, "write_attempts": attempts, "usage": Usage()}
 
+    claim_mode = is_claim_mode(state)
     model = chat_model(ctx.writer_model, effort="medium").with_structured_output(
-        Draft,
+        ClaimDraft if claim_mode else Draft,
         method="json_schema",  # native structured output, as in the planner
         include_raw=True,      # keep the raw AIMessage so we can read usage and stop_reason
     )
     out = model.invoke([
-        ("system", load_prompt("writer_v1")),
+        ("system", load_prompt("writer_claim_v1" if claim_mode else "writer_v1")),
         ("user", render_input(state, claims)),
     ])
 
@@ -75,7 +88,8 @@ def verified_claims(state: FactCheckState) -> list[Claim]:
 
 def render_input(state: FactCheckState, claims: list[Claim]) -> str:
     texts = {sq.id: sq.text for sq in state["sub_questions"]}
-    lines = [f"<topic>{escape(state['topic'])}</topic>", "", "<claims>"]
+    tag = "claim_to_check" if is_claim_mode(state) else "topic"
+    lines = [f"<{tag}>{escape(state['topic'])}</{tag}>", "", "<claims>"]
     for c in claims:
         question = quoteattr(texts.get(c.sub_question_id, ""))
         lines.append(f"<claim id={quoteattr(c.id)} question={question}>{escape(c.text)}</claim>")
@@ -90,7 +104,7 @@ def render_input(state: FactCheckState, claims: list[Claim]) -> str:
     return "\n".join(lines)
 
 
-def to_report(draft: Draft, allowed_ids: set[str], topic: str) -> Report:
+def to_report(draft: Draft | ClaimDraft, allowed_ids: set[str], topic: str) -> Report:
     """Strip citations to unverified claims and list the cited claims in first-use order."""
     cited: list[str] = []
 
@@ -105,7 +119,7 @@ def to_report(draft: Draft, allowed_ids: set[str], topic: str) -> Report:
 
     markdown = CITATION.sub(keep_or_strip, draft.markdown).strip()
     title = " ".join(draft.title.split()) or default_title(topic)
-    return Report(title=title, markdown=markdown, claim_ids=cited)
+    return Report(title=title, markdown=markdown, claim_ids=cited, rating=getattr(draft, "rating", None))
 
 
 def default_title(topic: str) -> str:

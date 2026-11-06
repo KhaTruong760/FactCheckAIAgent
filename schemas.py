@@ -62,7 +62,12 @@ class ResearchResult(BaseModel):
     evidence: list[Evidence]
     claims: list[Claim]
 
+# overall ruling on the user's claim (claim mode only)
+Rating = Literal["TRUE", "FALSE", "MIXED", "DISPUTED", "NOT_ENOUGH_EVIDENCE"]
+
+
 class Report(BaseModel):
     title: str
     markdown: str
     claim_ids: list[str]
+    rating: Rating | None = None  # None in topic mode

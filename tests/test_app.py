@@ -50,6 +50,16 @@ def test_unverified_claims_get_their_own_section():
     assert out.endswith("## Could not verify\n\n- Claim c.\n")
 
 
+def test_rating_is_shown_under_the_title():
+    report = Report(title="Eiffel Tower", markdown="X [claim:a].", claim_ids=[], rating="NOT_ENOUGH_EVIDENCE")
+    out = render_markdown(report, CLAIMS, EVIDENCE)
+    assert out.startswith("# Eiffel Tower\n\n**Verdict: Not enough evidence**\n\nX [1].")
+
+
+def test_no_rating_line_in_topic_mode():
+    assert "Verdict" not in render_markdown(_report("X [claim:a]."), CLAIMS, EVIDENCE)
+
+
 # --- run / main on the stub graph (no network) ---
 
 def test_run_returns_full_state_with_claims_and_evidence():
@@ -111,6 +121,18 @@ def test_main_fails_fast_without_api_keys(monkeypatch, capsys):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     assert main(["Eiffel"]) == 2
     assert "TAVILY_API_KEY" in capsys.readouterr().err
+
+
+def test_claim_flag_runs_in_claim_mode(stub_pipeline, monkeypatch, capsys):
+    seen = {}
+    real_run = app.run
+    def spy(*args, **kwargs):
+        seen["mode"] = kwargs["mode"]
+        return real_run(*args, **kwargs)
+    monkeypatch.setattr(app, "run", spy)
+    assert main(["The Eiffel Tower opened in 1899", "--claim"]) == 0
+    assert seen["mode"] == "claim"
+    assert parse_args(["x"]).claim is False
 
 
 def test_args_map_onto_run_context():
